@@ -5,16 +5,29 @@ import { motion } from 'motion/react';
 import { 
   Settings, Play, RefreshCw, Info, Code, AlertCircle, ChevronRight, 
   Activity, FileCode, Terminal, Layout, Save, Upload, X, Maximize2, 
-  Database, Square, Sliders, Plus, Folder
+  Database, Square, Sliders, Plus, Folder, Trash2
 } from 'lucide-react';
 import * as THREE from 'three';
 import { calculateKinematics, RobotState } from './kinematics';
 import { SpiRobsModel } from './components/SpiRobsModel';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import Editor from '@monaco-editor/react';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function ResizeHandle({ vertical = false }: { vertical?: boolean }) {
+  return (
+    <PanelResizeHandle className={cn(
+      "flex items-center justify-center bg-[#ccc] transition-colors hover:bg-[#99b] z-10",
+      vertical ? "h-1 w-full cursor-row-resize" : "w-1 h-full cursor-col-resize"
+    )}>
+      <div className={cn("bg-[#888] rounded-full", vertical ? "w-8 h-[2px]" : "h-8 w-[2px]")} />
+    </PanelResizeHandle>
+  );
 }
 
 function CustomControls({ fingers, cableDistance }: { fingers: any, cableDistance: number }) {
@@ -119,6 +132,7 @@ export default function App() {
     { id: '2', name: 'Gripper Config', code: '// Gripper Configuration\nCableDistance = 15;' },
   ]);
   const [activeModelId, setActiveModelId] = useState('1');
+  const [cursorPos, setCursorPos] = useState({ lineNumber: 1, column: 1 });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -273,6 +287,20 @@ export default function App() {
     addLog("Workspace reset to default values.");
   };
 
+  const saveActiveFile = () => {
+    if (!activeModel) return;
+    const blob = new Blob([activeModel.code], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeModel.name}.cpp`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog(`Saved file: ${activeModel.name}.cpp`);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -422,7 +450,7 @@ export default function App() {
           <RibbonButton 
             id="run-btn"
             icon={<Play size={24} className="text-green-600 fill-green-600/20" />} 
-            label="Run" 
+            label={activeModel.folderId ? "Run Folder" : "Run"} 
             onClick={runSequence}
             disabled={isPlayingSequence}
           />
@@ -432,6 +460,11 @@ export default function App() {
             onClick={() => setIsPlayingSequence(false)}
           />
           <div className="w-[1px] h-12 bg-[#ddd] mx-2" />
+          <RibbonButton 
+            icon={<Save size={24} className="text-blue-600" />} 
+            label="Save File" 
+            onClick={saveActiveFile}
+          />
           <RibbonButton 
             icon={<Upload size={24} className="text-blue-600" />} 
             label="Import File" 
@@ -481,91 +514,125 @@ export default function App() {
       />
 
       {/* Main IDE Layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <PanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
         {/* Left: Current Folder & Details */}
-        <div className="w-64 border-r border-[#ccc] bg-white flex flex-col shrink-0">
-          <div className="flex-1 flex flex-col border-b border-[#ccc]">
-            <div className="h-7 bg-[#f5f5f5] border-b border-[#eee] flex items-center px-3 justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[#666]"><Database size={14} /></span>
-                <span className="text-[11px] font-bold text-[#555] uppercase tracking-tight">Current Folder</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Import File"
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  <Upload size={13} />
-                </button>
-                <button 
-                  onClick={() => folderInputRef.current?.click()}
-                  title="Import Folder"
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  <Folder size={13} />
-                </button>
-                <button 
-                  onClick={() => {
-                    const name = prompt("Enter file name (e.g. control.cpp):");
-                    if (name) addModel(name.replace('.cpp', ''));
-                  }}
-                  title="New File"
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 text-[11px]">
-              {Object.entries(groupedModels).map(([folderId, group]) => (
-                <div key={folderId} className="mb-2">
-                  {folderId !== 'root' && (
-                    <div className="flex items-center gap-1 p-1 font-bold text-[#666] bg-[#f5f5f5] mb-1 rounded">
-                      <ChevronRight size={10} />
-                      <Folder size={12} className="text-orange-400" />
-                      <span className="truncate">{group.name}</span>
-                    </div>
-                  )}
-                  <div className={folderId !== 'root' ? "pl-3 space-y-0.5" : "space-y-0.5"}>
-                    {group.models.map(m => (
-                      <div 
-                        key={m.id}
-                        onClick={() => handleFileClick(m)}
-                        onContextMenu={(e) => handleContextMenu(e, m.id)}
-                        className={cn(
-                          "flex items-center gap-2 p-1 hover:bg-[#f0f7ff] cursor-pointer transition-colors rounded",
-                          activeModelId === m.id ? "bg-[#e5f1ff] text-[#0056b3] font-medium" : "text-[#555]"
-                        )}
-                      >
-                        <FileCode size={14} className={activeModelId === m.id ? "text-blue-600" : "text-gray-400"} />
-                        <span className="truncate">{m.name}.cpp</span>
-                      </div>
-                    ))}
-                  </div>
+        <Panel defaultSize={20} minSize={10} className="bg-white flex flex-col shrink-0">
+          <PanelGroup orientation="vertical">
+            <Panel defaultSize={70} minSize={20} className="flex flex-col border-b border-[#ccc]">
+              <div className="h-7 bg-[#f5f5f5] border-b border-[#eee] flex items-center px-3 justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#666]"><Database size={14} /></span>
+                  <span className="text-[11px] font-bold text-[#555] uppercase tracking-tight">Current Folder</span>
                 </div>
-              ))}
-            </div>
-          </div>
-          
-          <div className="h-48 flex flex-col">
-            <PanelHeader icon={<Info size={14} />} title="Details" />
-            <div className="flex-1 p-3 text-[11px] text-[#888] italic flex items-center justify-center text-center">
-              Select a file to view details
-            </div>
-          </div>
-        </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Import File"
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    <Upload size={13} />
+                  </button>
+                  <button 
+                    onClick={() => folderInputRef.current?.click()}
+                    title="Import Folder"
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    <Folder size={13} />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const name = prompt("Enter file name (e.g. control.cpp):");
+                      if (name) addModel(name.replace('.cpp', ''));
+                    }}
+                    title="New File"
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 text-[11px]">
+                {Object.entries(groupedModels).map(([folderId, group]) => (
+                  <div key={folderId} className="mb-2">
+                    {folderId !== 'root' && (
+                      <div className="flex items-center gap-1 p-1 font-bold text-[#666] bg-[#f5f5f5] mb-1 rounded">
+                        <ChevronRight size={10} />
+                        <Folder size={12} className="text-orange-400" />
+                        <span className="truncate">{group.name}</span>
+                      </div>
+                    )}
+                    <div className={folderId !== 'root' ? "pl-3 space-y-0.5" : "space-y-0.5"}>
+                      {group.models.map(m => (
+                        <div 
+                          key={m.id}
+                          onClick={() => handleFileClick(m)}
+                          onContextMenu={(e) => handleContextMenu(e, m.id)}
+                          className={cn(
+                            "flex items-center gap-2 p-1 hover:bg-[#f0f7ff] cursor-pointer transition-colors rounded",
+                            activeModelId === m.id ? "bg-[#e5f1ff] text-[#0056b3] font-medium" : "text-[#555]"
+                          )}
+                        >
+                          <FileCode size={14} className={activeModelId === m.id ? "text-blue-600" : "text-gray-400"} />
+                          <span className="truncate">{m.name}.cpp</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+            
+            <ResizeHandle vertical />
+            
+            <Panel defaultSize={30} minSize={10} className="flex flex-col">
+              <PanelHeader icon={<Info size={14} />} title="Details" />
+              <div className="flex-1 p-3 text-[11px] text-[#555] flex flex-col gap-2 overflow-y-auto">
+                {activeModel ? (
+                  <>
+                    <div className="font-semibold text-[#333] mb-1 text-[12px]">{activeModel.name}.cpp</div>
+                    {activeModel.folderName && (
+                      <div className="flex justify-between border-b border-[#eee] pb-1">
+                        <span className="text-[#888]">Folder:</span>
+                        <span className="font-mono">{activeModel.folderName}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-b border-[#eee] pb-1">
+                      <span className="text-[#888]">Size:</span>
+                      <span className="font-mono">{new Blob([activeModel.code]).size} bytes</span>
+                    </div>
+                    <div className="flex justify-between border-b border-[#eee] pb-1">
+                      <span className="text-[#888]">Lines:</span>
+                      <span className="font-mono">{activeModel.code.split('\n').length}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-[#eee] pb-1">
+                      <span className="text-[#888]">Type:</span>
+                      <span className="font-mono">C++ Source File</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-[#888] italic flex items-center justify-center h-full text-center">
+                    Select a file to view details
+                  </div>
+                )}
+              </div>
+            </Panel>
+          </PanelGroup>
+        </Panel>
+
+        <ResizeHandle />
 
         {/* Center: 3D Plot & Command Window */}
-        <div className="flex-1 flex flex-col bg-[#e1e1e1] p-1 gap-1 overflow-hidden">
-          {/* 3D Visualization Pane - Positioned where the script was */}
-          {show3DFigure && (
-            <div className="flex-1 bg-white border border-[#ccc] flex flex-col relative shadow-sm overflow-hidden">
-              <PanelHeader 
-                icon={<Layout size={14} />} 
-                title={`3D FIGURE: ${activeModel.name.toUpperCase()}`} 
-                onClose={() => setShow3DFigure(false)}
-              />
+        <Panel defaultSize={50} minSize={20} className="flex flex-col bg-[#e1e1e1] p-1 gap-1 overflow-hidden">
+          <PanelGroup orientation="vertical">
+            {/* 3D Visualization Pane - Positioned where the script was */}
+            {show3DFigure && (
+              <>
+                <Panel defaultSize={70} minSize={20} className="bg-white border border-[#ccc] flex flex-col relative shadow-sm overflow-hidden">
+                  <PanelHeader 
+                    icon={<Layout size={14} />} 
+                    title={`3D FIGURE: ${activeModel.name.toUpperCase()}`} 
+                    onClose={() => setShow3DFigure(false)}
+                  />
               <div className="flex-1 relative bg-[#fcfcfc]" ref={canvasRef}>
                 <Canvas shadows>
                   <PerspectiveCamera makeDefault position={[200, 200, 200]} fov={45} />
@@ -634,12 +701,22 @@ export default function App() {
                 </motion.div>
               )}
             </div>
-          </div>
-        )}
+            </Panel>
+            {show3DFigure && <ResizeHandle vertical />}
+            </>
+          )}
 
           {/* Bottom: Command Window */}
-          <div className="h-48 bg-white border border-[#ccc] flex flex-col shadow-sm overflow-hidden">
-            <PanelHeader icon={<Terminal size={14} />} title="Command Window" />
+          <Panel defaultSize={show3DFigure ? 30 : 100} minSize={10} className="bg-white border border-[#ccc] flex flex-col shadow-sm overflow-hidden">
+            <PanelHeader 
+              icon={<Terminal size={14} />} 
+              title="Command Window" 
+              actions={
+                <button onClick={() => setLogs([])} className="text-[#888] hover:text-[#333] p-1 rounded hover:bg-[#eee] transition-colors" title="Clear Console">
+                  <Trash2 size={12} />
+                </button>
+              }
+            />
             <div className="flex-1 p-3 font-mono text-[11px] text-[#333] overflow-y-auto bg-white">
               {logs.map((log, i) => (
                 <div key={i} className="mb-0.5">
@@ -665,80 +742,101 @@ export default function App() {
                 />
               </div>
             </div>
-          </div>
-        </div>
+          </Panel>
+          </PanelGroup>
+        </Panel>
+
+        <ResizeHandle />
 
         {/* Right: Workspace & Editor */}
-        <div className="w-80 border-l border-[#ccc] bg-[#e1e1e1] flex flex-col shrink-0 p-1 gap-1">
-          {/* Workspace */}
-          <div className="h-1/2 bg-white border border-[#ccc] flex flex-col shadow-sm overflow-hidden">
-            <PanelHeader icon={<Database size={14} />} title="Workspace" />
-            <div className="flex-1 overflow-y-auto">
-              <table className="w-full text-[11px] border-collapse">
-                <thead>
-                  <tr className="bg-[#f5f5f5] text-[#666] border-b border-[#eee]">
-                    <th className="text-left p-2 font-medium">Name</th>
-                    <th className="text-left p-2 font-medium">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {workspaceVars.map(v => (
-                    <WorkspaceRow 
-                      key={v.id}
-                      name={v.name} 
-                      value={v.value} 
-                      onEdit={() => setEditingVar({ name: v.name, value: v.value })}
-                    />
-                  ))}
-                </tbody>
-              </table>
-              <button 
-                onClick={addWorkspaceVar}
-                className="w-full p-2 text-[10px] text-blue-600 hover:bg-blue-50 text-left border-t border-[#eee]"
-              >
-                + Add Variable
-              </button>
-            </div>
-          </div>
-
-          {/* Editor / Script Area - Now in the right sidebar */}
-          <div className="flex-1 bg-white border border-[#ccc] flex flex-col shadow-sm overflow-hidden">
-            <div className="bg-[#f0f0f0] border-b border-[#ccc] px-2 py-1 flex items-center justify-between">
-              <div className="flex items-center gap-1 text-[11px] font-bold text-[#555] uppercase">
-                <FileCode size={14} className="text-blue-600" />
-                Editor
-              </div>
-              <button onClick={() => addModel()} className="px-2 py-1 text-[10px] text-blue-600 hover:bg-blue-50 font-bold">+</button>
-            </div>
-            <div className="bg-[#f5f5f5] border-b border-[#eee] flex items-center gap-1 overflow-x-auto no-scrollbar px-1">
-              {models.map(m => (
-                <button
-                  key={m.id}
-                  onClick={() => setActiveModelId(m.id)}
-                  className={cn(
-                    "px-2 py-1 text-[9px] transition-colors whitespace-nowrap border-b-2",
-                    activeModelId === m.id 
-                      ? "border-blue-600 text-blue-600 font-bold bg-white" 
-                      : "border-transparent text-[#666] hover:bg-[#e5e5e5]"
-                  )}
+        <Panel defaultSize={30} minSize={20} className="bg-[#e1e1e1] flex flex-col shrink-0 p-1 gap-1">
+          <PanelGroup orientation="vertical">
+            {/* Workspace */}
+            <Panel defaultSize={40} minSize={10} className="bg-white border border-[#ccc] flex flex-col shadow-sm overflow-hidden">
+              <PanelHeader icon={<Database size={14} />} title="Workspace" />
+              <div className="flex-1 overflow-y-auto">
+                <table className="w-full text-[11px] border-collapse">
+                  <thead>
+                    <tr className="bg-[#f5f5f5] text-[#666] border-b border-[#eee]">
+                      <th className="text-left p-2 font-medium">Name</th>
+                      <th className="text-left p-2 font-medium">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workspaceVars.map(v => (
+                      <WorkspaceRow 
+                        key={v.id}
+                        name={v.name} 
+                        value={v.value} 
+                        onEdit={() => setEditingVar({ name: v.name, value: v.value })}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+                <button 
+                  onClick={addWorkspaceVar}
+                  className="w-full p-2 text-[10px] text-blue-600 hover:bg-blue-50 text-left border-t border-[#eee]"
                 >
-                  {m.name}.m
+                  + Add Variable
                 </button>
-              ))}
-            </div>
-            <div className="flex-1 flex overflow-hidden">
-              <textarea 
-                className="flex-1 p-2 font-mono text-[10px] text-[#333] bg-[#fdfdfd] resize-none focus:outline-none leading-[1.4em] whitespace-pre"
-                value={activeModel.code}
-                onChange={(e) => {
-                  setModels(models.map(m => m.id === activeModelId ? { ...m, code: e.target.value } : m));
-                }}
-                spellCheck={false}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+              </div>
+            </Panel>
+
+            <ResizeHandle vertical />
+
+            {/* Editor / Script Area - Now in the right sidebar */}
+            <Panel defaultSize={60} minSize={20} className="bg-white border border-[#ccc] flex flex-col shadow-sm overflow-hidden">
+              <div className="bg-[#f0f0f0] border-b border-[#ccc] px-2 py-1 flex items-center justify-between">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-[#555] uppercase">
+                  <FileCode size={14} className="text-blue-600" />
+                  Editor
+                </div>
+                <button onClick={() => addModel()} className="px-2 py-1 text-[10px] text-blue-600 hover:bg-blue-50 font-bold">+</button>
+              </div>
+              <div className="bg-[#f5f5f5] border-b border-[#eee] flex items-center gap-1 overflow-x-auto no-scrollbar px-1">
+                {models.map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => setActiveModelId(m.id)}
+                    className={cn(
+                      "px-2 py-1 text-[9px] transition-colors whitespace-nowrap border-b-2",
+                      activeModelId === m.id 
+                        ? "border-blue-600 text-blue-600 font-bold bg-white" 
+                        : "border-transparent text-[#666] hover:bg-[#e5e5e5]"
+                    )}
+                  >
+                    {m.name}.m
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 flex overflow-hidden">
+                <Editor
+                  height="100%"
+                  language="cpp"
+                  theme="light"
+                  value={activeModel.code}
+                  onChange={(value) => {
+                    setModels(models.map(m => m.id === activeModelId ? { ...m, code: value || '' } : m));
+                  }}
+                  onMount={(editor) => {
+                    editor.onDidChangeCursorPosition((e) => {
+                      setCursorPos({ lineNumber: e.position.lineNumber, column: e.position.column });
+                    });
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 12,
+                    wordWrap: 'on',
+                    scrollBeyondLastLine: false,
+                    lineNumbersMinChars: 3,
+                    padding: { top: 8 },
+                  }}
+                />
+              </div>
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
 
       {/* Status Bar */}
       <div className="h-6 bg-[#f5f5f5] border-t border-[#ccc] flex items-center px-4 justify-between text-[10px] text-[#666] shrink-0">
@@ -747,7 +845,7 @@ export default function App() {
             <div className={cn("w-2 h-2 rounded-full", isPlayingSequence ? "bg-green-500 animate-pulse" : "bg-zinc-400")} />
             {isPlayingSequence ? "Executing..." : "Ready"}
           </span>
-          <span>Ln {activeModel.code.split('\n').length}, Col 1</span>
+          <span>Ln {cursorPos.lineNumber}, Col {cursorPos.column}</span>
         </div>
         <div className="flex items-center gap-4">
           <span>UTF-8</span>
@@ -889,7 +987,7 @@ function RibbonButton({ id, icon, label, onClick, disabled }: { id?: string, ico
   );
 }
 
-function PanelHeader({ icon, title, onClose }: { icon: React.ReactNode, title: string, onClose?: () => void }) {
+function PanelHeader({ icon, title, onClose, actions }: { icon: React.ReactNode, title: string, onClose?: () => void, actions?: React.ReactNode }) {
   return (
     <div className="h-7 bg-[#f5f5f5] border-b border-[#eee] flex items-center px-3 justify-between shrink-0">
       <div className="flex items-center gap-2">
@@ -897,6 +995,7 @@ function PanelHeader({ icon, title, onClose }: { icon: React.ReactNode, title: s
         <span className="text-[11px] font-bold text-[#555] uppercase tracking-tight">{title}</span>
       </div>
       <div className="flex items-center gap-1">
+        {actions}
         <Maximize2 size={10} className="text-[#aaa] hover:text-[#666] cursor-pointer" />
         <X size={12} className="text-[#aaa] hover:text-[#666] cursor-pointer" onClick={onClose} />
       </div>
