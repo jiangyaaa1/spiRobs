@@ -10,17 +10,13 @@ export interface RobotState {
   theta: number;       // Bending angle (theta = kappa * L)
 }
 
-export const CABLE_DISTANCE = 15; // Distance from center to cable (mm)
-
-export function calculateKinematics(l1: number, l2: number, l3: number): RobotState {
+export function calculateKinematics(l1: number, l2: number, l3: number, d: number): RobotState {
   // Central backbone length is the average of the three cable lengths
   const L = (l1 + l2 + l3) / 3;
 
   // Intermediate values for curvature calculation
   // Based on the geometric relationship: li = L * (1 + kappa * d * cos(phi - phi_i))
   // where phi_i = [0, 2pi/3, 4pi/3]
-  
-  const d = CABLE_DISTANCE;
   
   // Curvature kappa
   // From the sum of squares of differences:
