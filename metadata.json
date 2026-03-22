@@ -1,0 +1,5 @@
+{
+  "name": "SpiRobs Simulator",
+  "description": "A 3D simulation and debugging tool for 3-cable spiral-structured soft robots (SpiRobs).",
+  "requestFramePermissions": []
+}
